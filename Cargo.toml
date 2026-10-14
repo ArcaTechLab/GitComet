@@ -388,11 +388,11 @@ opt-level = 1
 [profile.ci-test.package.taffy]
 opt-level = 1
 
-# Compile/link coverage only. Actual performance measurements still use bench,
-# which inherits the production release settings below.
+# Unoptimized compile/link coverage only. Actual performance measurements use
+# release or bench with the production release settings below.
 [profile.ci-bench]
 inherits = "release"
-opt-level = 1
+opt-level = 0
 debug = 0
 split-debuginfo = "off"
 lto = "off"
@@ -430,10 +430,3 @@ strip = "debuginfo"
 inherits = "release"
 debug = 2
 strip = "none"
-
-# Diagnostic compile/link candidate. Promote only after paired hosted measurements.
-[profile.ci-bench-candidate]
-inherits = "ci-bench"
-
-[profile.ci-bench-candidate.package.gitcomet-ui-gpui]
-opt-level = 0
