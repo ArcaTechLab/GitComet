@@ -1108,7 +1108,7 @@ fn conflicted_merge(dir: &Path) {
     git(dir, &["checkout", "-q", "main"]);
     std::fs::write(dir.join("a.txt"), "ours\n").unwrap();
     commit(dir, "ours");
-    let merge = std::process::Command::new("git")
+    let merge = gitcomet_core::test_support::git_fixture::git_command()
         .arg("-C")
         .arg(dir)
         // Merge checks the committer identity even with --no-commit.

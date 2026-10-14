@@ -2402,6 +2402,7 @@ dependencies = [
  "faster-hex 1.0.0",
  "filetime",
  "fnv",
+ "gitcomet-core",
  "gitcomet-filesystem-native",
  "gix-quote",
  "jiff",
