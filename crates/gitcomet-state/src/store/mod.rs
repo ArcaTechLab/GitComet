@@ -96,6 +96,17 @@ fn make_mut_state_with_diagnostics(state: &mut Arc<AppState>) -> &mut AppState {
     }
 }
 
+/// Feedback acknowledgements only release entries the window has shown. The
+/// worker applies them in the next reducer pass instead of copying and
+/// publishing the whole state for them alone; the window already finds new
+/// entries by sequence, so entries it has shown may linger until then.
+fn is_feedback_acknowledgement(msg: &Msg) -> bool {
+    matches!(
+        msg,
+        Msg::AcknowledgeNotifications { .. } | Msg::AcknowledgeRepoFeedback { .. }
+    )
+}
+
 fn is_control_msg(msg: &Msg) -> bool {
     matches!(
         msg,
@@ -227,6 +238,9 @@ struct WorkerLoopContext<'a> {
     session_persist_executor: &'a TaskExecutor,
     backend: &'a Arc<dyn GitBackend>,
     publication: &'a AtomicU64,
+    /// Feedback acknowledgements held for the next reducer pass; see
+    /// [`is_feedback_acknowledgement`].
+    deferred_acknowledgements: &'a mut Vec<Msg>,
 }
 
 impl WorkerLoopContext<'_> {
@@ -253,6 +267,9 @@ impl WorkerLoopContext<'_> {
             let mut app_state = self.thread_state.write().unwrap_or_else(|e| e.into_inner());
             let mutable = make_mut_state_with_diagnostics(&mut app_state);
             let reduce_started = Instant::now();
+            for acknowledgement in self.deferred_acknowledgements.drain(..) {
+                reduce(repos, id_alloc, mutable, acknowledgement);
+            }
             let effects = reduce_with(mutable, repos, id_alloc);
             let reduce_duration = reduce_started.elapsed();
             reducer_diagnostics::record_reducer_pass(reduce_duration);
@@ -679,6 +696,7 @@ impl AppStore {
             let id_alloc = AtomicU64::new(1);
             let active_repo_id = Arc::new(AtomicU64::new(0));
             let mut deferred_commands = VecDeque::new();
+            let mut deferred_acknowledgements = Vec::new();
 
             while let Ok(command) = recv_next_worker_command(&command_rx, &mut deferred_commands) {
                 let (mut msg, stamp) = match command {
@@ -718,6 +736,10 @@ impl AppStore {
                 };
 
                 if !thread_msg_tx.is_alive() {
+                    continue;
+                }
+                if is_feedback_acknowledgement(&msg) {
+                    deferred_acknowledgements.push(msg);
                     continue;
                 }
 
@@ -838,6 +860,7 @@ impl AppStore {
                     session_persist_executor: &session_persist_executor,
                     backend: &backend,
                     publication: &thread_publication,
+                    deferred_acknowledgements: &mut deferred_acknowledgements,
                 };
 
                 match msg {
