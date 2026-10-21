@@ -477,7 +477,9 @@ use navigation_and_search::{
     resolved_output_placeholder_protected_ranges_for_test,
 };
 
+mod action_origin;
 mod bootstrap;
 mod editing;
+mod plan_reload;
 mod previews;
 mod scrolling;

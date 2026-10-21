@@ -5,6 +5,9 @@ use gitcomet_core::conflict_session::{ConflictPayload, ConflictResolverStrategy,
 use gitcomet_core::domain::{FileConflictKind, FileStatus, FileStatusKind, RepoStatus};
 use gitcomet_core::services::ConflictSide;
 
+mod plan_reload;
+mod region_origin;
+
 /// Helper: set up a repo state with a conflicted status entry.
 fn setup_repo_with_conflict(
     state: &mut AppState,
@@ -48,6 +51,16 @@ fn setup_repo_with_conflict(
     repo_state.set_conflict_file_path(Some(PathBuf::from(path)));
 
     repo_id
+}
+
+fn conflict_region_origin(state: &AppState) -> Arc<crate::msg::ConflictRegionOrigin> {
+    Arc::new(crate::msg::ConflictRegionOrigin::from_session(
+        state.repos[0]
+            .conflict_state
+            .conflict_session
+            .as_ref()
+            .expect("loaded conflict session"),
+    ))
 }
 
 fn sample_marker_conflict_file(path: &str) -> ConflictFile {
@@ -454,6 +467,27 @@ fn conflict_file_loaded_builds_session_with_regions() {
 
 #[test]
 fn current_only_session_preserves_first_paint_pick_on_full_upgrade() {
+    first_paint_pick_survives_full_upgrade(FirstPaintPickTiming::Before);
+}
+
+#[test]
+fn current_only_session_preserves_first_paint_pick_during_full_upgrade() {
+    first_paint_pick_survives_full_upgrade(FirstPaintPickTiming::During);
+}
+
+#[test]
+fn current_only_session_maps_stale_first_paint_pick_after_full_upgrade() {
+    first_paint_pick_survives_full_upgrade(FirstPaintPickTiming::After);
+}
+
+#[derive(Clone, Copy)]
+enum FirstPaintPickTiming {
+    Before,
+    During,
+    After,
+}
+
+fn first_paint_pick_survives_full_upgrade(timing: FirstPaintPickTiming) {
     use gitcomet_core::conflict_session::ConflictRegionResolution;
 
     let mut repos: RepositoryRuntimes = Default::default();
@@ -503,17 +537,17 @@ fn current_only_session_preserves_first_paint_pick_on_full_upgrade() {
     assert!(provisional.ours.is_absent());
     assert!(provisional.theirs.is_absent());
 
-    reduce(
-        &mut repos,
-        &id_alloc,
-        &mut state,
-        Msg::ConflictToggleRegionSource {
-            repo_id,
-            path: PathBuf::from("file.txt").into(),
-            region_index: 0,
-            source: gitcomet_core::merge::MergeSource::A,
-        },
-    );
+    let origin = conflict_region_origin(&state);
+    let pick = || Msg::ConflictToggleRegionSource {
+        repo_id,
+        path: PathBuf::from("file.txt").into(),
+        origin: origin.clone(),
+        region_index: 0,
+        source: gitcomet_core::merge::MergeSource::A,
+    };
+    if matches!(timing, FirstPaintPickTiming::Before) {
+        reduce(&mut repos, &id_alloc, &mut state, pick());
+    }
     reduce(
         &mut repos,
         &id_alloc,
@@ -524,6 +558,9 @@ fn current_only_session_preserves_first_paint_pick_on_full_upgrade() {
             mode: crate::model::ConflictFileLoadMode::Full,
         },
     );
+    if matches!(timing, FirstPaintPickTiming::During) {
+        reduce(&mut repos, &id_alloc, &mut state, pick());
+    }
     let backend_session = ConflictSession::from_merged_shared_text(
         PathBuf::from("file.txt"),
         FileConflictKind::BothModified,
@@ -545,6 +582,9 @@ fn current_only_session_preserves_first_paint_pick_on_full_upgrade() {
             conflict_session: Some(Box::new(backend_session)),
         }),
     );
+    if matches!(timing, FirstPaintPickTiming::After) {
+        reduce(&mut repos, &id_alloc, &mut state, pick());
+    }
 
     let upgraded = state.repos[0]
         .conflict_state
@@ -611,6 +651,7 @@ fn current_only_pick_maps_across_partitioned_stage_plan_boundaries() {
             conflict_session: None,
         }),
     );
+    let origin = conflict_region_origin(&state);
     reduce(
         &mut repos,
         &id_alloc,
@@ -618,6 +659,7 @@ fn current_only_pick_maps_across_partitioned_stage_plan_boundaries() {
         Msg::ConflictToggleRegionSource {
             repo_id,
             path: PathBuf::from("file.txt").into(),
+            origin: origin.clone(),
             region_index: 0,
             source: MergeSource::A,
         },
@@ -1515,6 +1557,7 @@ fn conflict_ordered_source_messages_toggle_append_and_replace_manual_content() {
     );
 
     for source in [MergeSource::B, MergeSource::C] {
+        let origin = conflict_region_origin(&state);
         reduce(
             &mut repos,
             &id_alloc,
@@ -1522,6 +1565,7 @@ fn conflict_ordered_source_messages_toggle_append_and_replace_manual_content() {
             Msg::ConflictToggleRegionSource {
                 repo_id,
                 path: PathBuf::from("file.txt").into(),
+                origin: origin.clone(),
                 region_index: 0,
                 source,
             },
@@ -1540,6 +1584,7 @@ fn conflict_ordered_source_messages_toggle_append_and_replace_manual_content() {
         ]))
     );
 
+    let origin = conflict_region_origin(&state);
     reduce(
         &mut repos,
         &id_alloc,
@@ -1547,12 +1592,14 @@ fn conflict_ordered_source_messages_toggle_append_and_replace_manual_content() {
         Msg::ConflictSyncRegionResolutions {
             repo_id,
             path: PathBuf::from("file.txt").into(),
+            origin: origin.clone(),
             updates: vec![crate::msg::ConflictRegionResolutionUpdate {
                 region_index: 0,
                 resolution: ConflictRegionResolution::ManualEdit("manual\n".into()),
             }],
         },
     );
+    let origin = conflict_region_origin(&state);
     reduce(
         &mut repos,
         &id_alloc,
@@ -1560,6 +1607,7 @@ fn conflict_ordered_source_messages_toggle_append_and_replace_manual_content() {
         Msg::ConflictToggleRegionSource {
             repo_id,
             path: PathBuf::from("file.txt").into(),
+            origin: origin.clone(),
             region_index: 0,
             source: MergeSource::C,
         },
@@ -1576,6 +1624,7 @@ fn conflict_ordered_source_messages_toggle_append_and_replace_manual_content() {
         "a source pick replaces manual block content",
     );
 
+    let origin = conflict_region_origin(&state);
     reduce(
         &mut repos,
         &id_alloc,
@@ -1583,6 +1632,7 @@ fn conflict_ordered_source_messages_toggle_append_and_replace_manual_content() {
         Msg::ConflictReplaceRegionSelection {
             repo_id,
             path: PathBuf::from("file.txt").into(),
+            origin: origin.clone(),
             region_index: 0,
             selection: OrderedSelection::from_sources([MergeSource::C, MergeSource::B]),
         },
@@ -1601,6 +1651,7 @@ fn conflict_ordered_source_messages_toggle_append_and_replace_manual_content() {
         ]))
     );
 
+    let origin = conflict_region_origin(&state);
     reduce(
         &mut repos,
         &id_alloc,
@@ -1608,6 +1659,7 @@ fn conflict_ordered_source_messages_toggle_append_and_replace_manual_content() {
         Msg::ConflictReplaceRegionSelection {
             repo_id,
             path: PathBuf::from("file.txt").into(),
+            origin: origin.clone(),
             region_index: 0,
             selection: OrderedSelection::new(),
         },
@@ -2287,6 +2339,7 @@ theirs two\n\
         .conflict_state
         .conflict_rev;
 
+    let origin = conflict_region_origin(&state);
     reduce(
         &mut repos,
         &id_alloc,
@@ -2294,6 +2347,7 @@ theirs two\n\
         Msg::ConflictSyncRegionResolutions {
             repo_id,
             path: PathBuf::from("file.txt").into(),
+            origin: origin.clone(),
             updates: vec![
                 crate::msg::ConflictRegionResolutionUpdate {
                     region_index: 0,
@@ -2384,6 +2438,7 @@ theirs one\n\
         .conflict_state
         .conflict_rev;
 
+    let origin = conflict_region_origin(&state);
     reduce(
         &mut repos,
         &id_alloc,
@@ -2391,6 +2446,7 @@ theirs one\n\
         Msg::ConflictSyncRegionResolutions {
             repo_id,
             path: PathBuf::from("file.txt").into(),
+            origin: origin.clone(),
             updates: vec![crate::msg::ConflictRegionResolutionUpdate {
                 region_index: 0,
                 resolution: gitcomet_core::conflict_session::ConflictRegionResolution::Unresolved,

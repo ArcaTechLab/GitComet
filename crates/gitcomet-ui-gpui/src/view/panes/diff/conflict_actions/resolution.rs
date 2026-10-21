@@ -2,6 +2,39 @@
 //! dispatch, bulk choices, and resolution counts.
 
 use super::*;
+use gitcomet_core::conflict_session::ConflictRegionResolution;
+
+fn group_displayed_resolutions(
+    updates: Vec<(usize, ConflictRegionResolution)>,
+) -> FxHashMap<usize, Vec<ConflictRegionResolution>> {
+    let mut grouped = FxHashMap::<usize, Vec<ConflictRegionResolution>>::default();
+    for (index, resolution) in updates {
+        grouped.entry(index).or_default().push(resolution);
+    }
+    grouped
+}
+
+fn whole_region_resolution(
+    displayed: &[ConflictRegionResolution],
+) -> Option<&ConflictRegionResolution> {
+    let (first, rest) = displayed.split_first()?;
+    if rest.is_empty() {
+        return Some(first);
+    }
+    match first {
+        ConflictRegionResolution::ManualEdit(_) | ConflictRegionResolution::AutoResolved { .. } => {
+            None
+        }
+        ConflictRegionResolution::Unresolved
+        | ConflictRegionResolution::PickBase
+        | ConflictRegionResolution::PickOurs
+        | ConflictRegionResolution::PickTheirs
+        | ConflictRegionResolution::PickBoth
+        | ConflictRegionResolution::Sources(_) => {
+            rest.iter().all(|next| next == first).then_some(first)
+        }
+    }
+}
 
 impl DiffRenderer {
     pub(in crate::view) fn conflict_resolver_apply_pick_target(
@@ -210,10 +243,12 @@ impl DiffRenderer {
                     .or_else(|| self.active_repo_id()),
                 self.conflict_resolver.dispatch_path(),
             )
+            && let Some(origin) = self.conflict_resolver.plan_origin.clone()
         {
             self.store.dispatch(Msg::ConflictReplacePlanBlockSelection {
                 repo_id,
                 path,
+                origin,
                 block_id,
                 selection: gitcomet_core::merge::OrderedSelection::new(),
             });
@@ -332,27 +367,7 @@ impl DiffRenderer {
                 self.conflict_resolved_preview_line_count,
             );
         }
-        let should_sync_region = self
-            .conflict_resolver
-            .conflict_region_indices
-            .get(selected_conflict_ix)
-            .copied()
-            .is_some_and(|region_ix| {
-                conflict_region_index_is_unique(
-                    &self.conflict_resolver.conflict_region_indices,
-                    region_ix,
-                )
-            });
-        if should_sync_region {
-            if self.conflict_resolved_output_is_streamed() {
-                self.conflict_resolver_sync_session_resolutions_from_segments();
-            } else {
-                let output_text = self
-                    .conflict_resolver_input
-                    .read_with(cx, |input, _| input.text().to_string());
-                self.conflict_resolver_sync_session_resolutions_from_output(&output_text);
-            }
-        }
+        self.conflict_resolver_sync_local_choices(cx);
         cx.notify();
     }
 
@@ -449,6 +464,7 @@ impl DiffRenderer {
             }
         };
         if dispatch_region_choice
+            && let Some(origin) = self.conflict_resolver.region_origin.clone()
             && let (Some(repo_id), Some(path)) = (
                 self.conflict_resolver
                     .repo_id
@@ -460,16 +476,29 @@ impl DiffRenderer {
                 Some(Err(source)) => self.store.dispatch(Msg::ConflictToggleRegionSource {
                     repo_id,
                     path,
+                    origin,
                     region_index: picked_region_index,
                     source,
                 }),
                 Some(Ok(selection)) => self.store.dispatch(Msg::ConflictReplaceRegionSelection {
                     repo_id,
                     path,
+                    origin,
                     region_index: picked_region_index,
                     selection,
                 }),
                 None => {}
+            }
+            if let Some(resolutions) = group_displayed_resolutions(
+                conflict_resolver::derive_region_resolution_updates_from_segments(
+                    &self.conflict_resolver.marker_segments,
+                    &self.conflict_resolver.conflict_region_indices,
+                ),
+            )
+            .remove(&picked_region_index)
+                && let Some(baseline) = &mut self.conflict_resolver.region_resolution_baseline
+            {
+                baseline.insert(picked_region_index, resolutions);
             }
         }
         true
@@ -481,17 +510,17 @@ impl DiffRenderer {
         display_conflict_index: Option<usize>,
         choice: conflict_resolver::ConflictChoice,
     ) -> bool {
-        let Some((has_base, local_source, remote_source)) =
-            self.with_conflict_resolver_session(|session| {
-                let plan = session.merge_plan.as_ref()?;
-                plan.blocks
-                    .iter()
-                    .any(|block| block.id == block_id)
-                    .then_some((plan.has_base(), plan.local_source(), plan.remote_source()))
-            })
+        let Some(origin) = self
+            .conflict_resolver
+            .plan_origin
+            .clone()
+            .filter(|origin| origin.contains(block_id))
         else {
             return false;
         };
+        let has_base = origin.has_base();
+        let local_source = origin.local_source();
+        let remote_source = origin.remote_source();
         let to_merge_source = |source| {
             use gitcomet_core::conflict_output::ConflictOutputSource as Output;
             use gitcomet_core::merge::MergeSource;
@@ -524,6 +553,7 @@ impl DiffRenderer {
             self.store.dispatch(Msg::ConflictReplacePlanBlockSelection {
                 repo_id,
                 path,
+                origin,
                 block_id,
                 selection: gitcomet_core::merge::OrderedSelection::from_sources([
                     local_source,
@@ -537,6 +567,7 @@ impl DiffRenderer {
             self.store.dispatch(Msg::ConflictTogglePlanBlockSource {
                 repo_id,
                 path,
+                origin,
                 block_id,
                 source,
             });
@@ -544,6 +575,7 @@ impl DiffRenderer {
             self.store.dispatch(Msg::ConflictReplacePlanBlockSelection {
                 repo_id,
                 path,
+                origin,
                 block_id,
                 selection: gitcomet_core::merge::OrderedSelection::from_sources(
                     choice.iter().filter_map(to_merge_source),
@@ -581,24 +613,26 @@ impl DiffRenderer {
     pub(in crate::view) fn conflict_resolver_sync_session_resolutions_from_output(
         &mut self,
         output_text: &str,
-    ) {
+    ) -> bool {
         let Some(updates) = conflict_resolver::derive_region_resolution_updates_from_output(
             &self.conflict_resolver.marker_segments,
             &self.conflict_resolver.conflict_region_indices,
             &self.conflict_resolved_output_block_map,
             output_text,
         ) else {
-            return;
+            return false;
         };
-        self.conflict_resolver_dispatch_session_resolution_updates(updates);
+        self.conflict_resolver_dispatch_session_resolution_updates(updates)
     }
 
-    pub(in crate::view) fn conflict_resolver_sync_session_resolutions_from_segments(&mut self) {
+    pub(in crate::view) fn conflict_resolver_sync_session_resolutions_from_segments(
+        &mut self,
+    ) -> bool {
         let updates = conflict_resolver::derive_region_resolution_updates_from_segments(
             &self.conflict_resolver.marker_segments,
             &self.conflict_resolver.conflict_region_indices,
         );
-        self.conflict_resolver_dispatch_session_resolution_updates(updates);
+        self.conflict_resolver_dispatch_session_resolution_updates(updates)
     }
 
     fn conflict_resolver_dispatch_session_resolution_updates(
@@ -607,34 +641,145 @@ impl DiffRenderer {
             usize,
             gitcomet_core::conflict_session::ConflictRegionResolution,
         )>,
-    ) {
+    ) -> bool {
         if updates.is_empty() {
-            return;
+            return false;
         }
         let Some(repo_id) = self
             .conflict_resolver
             .repo_id
             .or_else(|| self.active_repo_id())
         else {
-            return;
+            return false;
         };
         let Some(path) = self.conflict_resolver.dispatch_path() else {
-            return;
+            return false;
         };
-        let updates = updates
+        let Some(origin) = self.conflict_resolver.region_origin.clone() else {
+            return false;
+        };
+        let Some(baseline) = &mut self.conflict_resolver.region_resolution_baseline else {
+            return false;
+        };
+        let updates: Vec<_> = group_displayed_resolutions(updates)
             .into_iter()
-            .map(
-                |(region_index, resolution)| gitcomet_state::msg::ConflictRegionResolutionUpdate {
+            .filter_map(|(region_index, displayed)| {
+                let previous = baseline.get_mut(&region_index)?;
+                if *previous == displayed {
+                    return None;
+                }
+                let resolution = whole_region_resolution(&displayed)?.clone();
+                let unchanged = whole_region_resolution(previous) == Some(&resolution);
+                *previous = displayed;
+                if unchanged {
+                    return None;
+                }
+                Some(gitcomet_state::msg::ConflictRegionResolutionUpdate {
                     region_index,
                     resolution,
-                },
-            )
+                })
+            })
             .collect();
+        if updates.is_empty() {
+            return false;
+        }
         self.store.dispatch(Msg::ConflictSyncRegionResolutions {
             repo_id,
             path,
+            origin,
             updates,
         });
+        true
+    }
+
+    pub(super) fn conflict_resolver_has_unrepresented_local_choices(&self, cx: &gpui::App) -> bool {
+        let Some(baseline) = &self.conflict_resolver.region_resolution_baseline else {
+            return false;
+        };
+        let mut seen = FxHashSet::default();
+        if !self
+            .conflict_resolver
+            .conflict_region_indices
+            .iter()
+            .any(|region| !seen.insert(*region))
+        {
+            return false;
+        }
+        let Some(updates) = self.conflict_resolver_displayed_resolution_updates(cx) else {
+            return true;
+        };
+        group_displayed_resolutions(updates)
+            .into_iter()
+            .any(|(index, displayed)| {
+                baseline.get(&index) != Some(&displayed)
+                    && whole_region_resolution(&displayed).is_none()
+            })
+    }
+
+    fn conflict_resolver_sync_local_choices(&mut self, cx: &mut gpui::Context<Self>) {
+        let dispatched = if self.conflict_resolved_output_is_streamed() {
+            self.conflict_resolver_sync_session_resolutions_from_segments()
+        } else {
+            let output = self
+                .conflict_resolver_input
+                .read_with(cx, |input, _| input.text().to_string());
+            self.conflict_resolver_sync_session_resolutions_from_output(&output)
+        };
+        if !dispatched
+            && self.conflict_resolver.refresh_deferred
+            && !self.conflict_resolver_has_unrepresented_local_choices(cx)
+        {
+            self.sync_conflict_resolver(cx);
+        }
+    }
+
+    fn conflict_resolver_sync_split_choice(
+        &mut self,
+        conflict_ix: usize,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self
+            .conflict_resolver
+            .conflict_region_indices
+            .get(conflict_ix)
+            .is_some_and(|&region_index| {
+                !conflict_region_index_is_unique(
+                    &self.conflict_resolver.conflict_region_indices,
+                    region_index,
+                )
+            })
+        {
+            self.conflict_resolver_sync_local_choices(cx);
+        }
+    }
+
+    fn conflict_resolver_displayed_resolution_updates(
+        &self,
+        cx: &gpui::App,
+    ) -> Option<Vec<(usize, ConflictRegionResolution)>> {
+        if self.conflict_resolved_output_is_streamed() {
+            return Some(
+                conflict_resolver::derive_region_resolution_updates_from_segments(
+                    &self.conflict_resolver.marker_segments,
+                    &self.conflict_resolver.conflict_region_indices,
+                ),
+            );
+        }
+        conflict_resolver::derive_region_resolution_updates_from_output(
+            &self.conflict_resolver.marker_segments,
+            &self.conflict_resolver.conflict_region_indices,
+            &self.conflict_resolved_output_block_map,
+            self.conflict_resolver_input.read(cx).text(),
+        )
+    }
+
+    pub(super) fn conflict_resolver_reset_resolution_baseline(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.conflict_resolver.region_resolution_baseline = self
+            .conflict_resolver_displayed_resolution_updates(cx)
+            .map(group_displayed_resolutions);
     }
 
     pub(in crate::view) fn conflict_resolver_reset_output_from_markers(
@@ -810,6 +955,7 @@ impl DiffRenderer {
         }
 
         self.conflict_resolver_auto_advance_to_next_unresolved(cx);
+        self.conflict_resolver_sync_split_choice(conflict_ix, cx);
         cx.notify();
     }
 
@@ -862,8 +1008,7 @@ impl DiffRenderer {
             ..
         }) = target
         {
-            return self.with_conflict_resolver_session(|session| {
-                let plan = session.merge_plan.as_ref()?;
+            return self.with_displayed_conflict_plan(|plan| {
                 let block = plan.blocks.iter().find(|block| block.id == *block_id)?;
                 let selected = block
                     .selection
@@ -885,6 +1030,37 @@ impl DiffRenderer {
                 .unwrap_or(false),
             self.conflict_resolver_selected_choices_for_conflict_ix(conflict_ix),
         ))
+    }
+
+    fn with_displayed_conflict_plan<T: Default>(
+        &self,
+        read: impl FnOnce(&gitcomet_core::merge::MergePlan) -> T,
+    ) -> T {
+        let (Some(path), Some(origin), Some(state)) = (
+            self.conflict_resolver.path.as_deref(),
+            self.conflict_resolver.plan_origin.as_ref(),
+            self.store.snapshot(),
+        ) else {
+            return T::default();
+        };
+        state
+            .repos
+            .iter()
+            .find(|repo| {
+                Some(repo.id) == self.conflict_resolver.repo_id
+                    && repo.conflict_state.conflict_file_path.as_deref() == Some(path)
+            })
+            .and_then(|repo| {
+                repo.conflict_state
+                    .conflict_session
+                    .as_ref()
+                    .or(repo.conflict_state.session_pending_restore.as_ref())
+            })
+            .filter(|session| session.path == path)
+            .and_then(|session| session.merge_plan.as_ref())
+            .filter(|plan| origin.matches_plan(plan))
+            .map(read)
+            .unwrap_or_default()
     }
 
     pub(in crate::view) fn conflict_resolver_has_active_pick_target(&self) -> bool {
@@ -944,6 +1120,7 @@ impl DiffRenderer {
             self.conflict_resolver_rebuild_visible_map();
             self.conflict_resolver_refresh_output_and_scroll(Some(picked_conflict_index), cx);
             self.conflict_resolver_auto_advance_to_next_unresolved(cx);
+            self.conflict_resolver_sync_split_choice(picked_conflict_index, cx);
         }
 
         cx.notify();

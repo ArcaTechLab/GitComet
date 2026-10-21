@@ -8,6 +8,8 @@ mod branch_exists_prompt;
 mod comparison_tests;
 mod conflict_interactions;
 mod conflict_load;
+mod conflict_region_commands;
+mod conflict_region_mapping;
 mod diff_selection;
 mod diff_session;
 mod effects;
@@ -38,7 +40,7 @@ pub(super) mod test_inputs;
 mod util;
 
 use crate::model::{AppState, Loadable, RepoId};
-use crate::msg::{ConflictRegionChoice, Effect, Msg, RepoPath, RepoPathList};
+use crate::msg::{ConflictRegionChoice, Effect, Msg, RepoPath, RepoPathList, WorktreeSaveBaseline};
 use auth::{annex_adjusted_refusal, annex_takeover};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -1563,22 +1565,26 @@ fn reduce_inner(
             stage,
             completion,
         } => {
-            let expected_contents = expected_contents.or_else(|| {
-                state.repos.iter().find(|r| r.id == repo_id).and_then(|r| {
-                    match &r.conflict_state.conflict_file {
-                        crate::model::Loadable::Ready(Some(file))
-                            if file.path.as_path() == path =>
-                        {
-                            file.current_bytes.clone().or_else(|| {
-                                file.current
-                                    .as_ref()
-                                    .map(|text| Arc::<[u8]>::from(text.as_bytes()))
-                            })
+            let expected_contents = match expected_contents {
+                WorktreeSaveBaseline::DeriveFromLoadedConflict => {
+                    state.repos.iter().find(|r| r.id == repo_id).and_then(|r| {
+                        match &r.conflict_state.conflict_file {
+                            crate::model::Loadable::Ready(Some(file))
+                                if file.path.as_path() == path =>
+                            {
+                                file.current_bytes.clone().or_else(|| {
+                                    file.current
+                                        .as_ref()
+                                        .map(|text| Arc::<[u8]>::from(text.as_bytes()))
+                                })
+                            }
+                            _ => None,
                         }
-                        _ => None,
-                    }
-                })
-            });
+                    })
+                }
+                WorktreeSaveBaseline::Absent => None,
+                WorktreeSaveBaseline::Present(contents) => Some(contents),
+            };
             begin_local_action(state, repo_id);
             actions_emit_effects::save_worktree_file(
                 repo_id,
@@ -1991,44 +1997,57 @@ fn reduce_inner(
         Msg::ConflictToggleRegionSource {
             repo_id,
             path,
+            origin,
             region_index,
             source,
-        } => {
-            conflict_interactions::toggle_region_source(state, repo_id, path, region_index, source)
-        }
-        Msg::ConflictReplaceRegionSelection {
-            repo_id,
-            path,
-            region_index,
-            selection,
-        } => conflict_interactions::replace_region_selection(
+        } => conflict_region_commands::toggle_region_source(
             state,
             repo_id,
             path,
+            origin,
+            region_index,
+            source,
+        ),
+        Msg::ConflictReplaceRegionSelection {
+            repo_id,
+            path,
+            origin,
+            region_index,
+            selection,
+        } => conflict_region_commands::replace_region_selection(
+            state,
+            repo_id,
+            path,
+            origin,
             region_index,
             selection,
         ),
         Msg::ConflictTogglePlanBlockSource {
             repo_id,
             path,
+            origin,
             block_id,
             source,
-        } => {
-            conflict_interactions::toggle_plan_block_source(state, repo_id, path, block_id, source)
-        }
+        } => conflict_interactions::toggle_plan_block_source(
+            state, repo_id, path, &origin, block_id, source,
+        ),
         Msg::ConflictReplacePlanBlockSelection {
             repo_id,
             path,
+            origin,
             block_id,
             selection,
         } => conflict_interactions::replace_plan_block_selection(
-            state, repo_id, path, block_id, selection,
+            state, repo_id, path, &origin, block_id, selection,
         ),
         Msg::ConflictSyncRegionResolutions {
             repo_id,
             path,
+            origin,
             updates,
-        } => conflict_interactions::sync_region_resolutions(state, repo_id, path, updates),
+        } => {
+            conflict_region_commands::sync_region_resolutions(state, repo_id, path, origin, updates)
+        }
         Msg::ConflictApplyAutosolve {
             repo_id,
             path,

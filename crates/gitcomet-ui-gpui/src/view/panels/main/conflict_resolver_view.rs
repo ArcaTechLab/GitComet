@@ -495,17 +495,60 @@ impl DiffRenderer {
         };
         let text = self.current_conflict_resolved_output_text(cx);
         let text = self.conflict_resolver_save_contents_from_text(text);
+        let saved_text: Arc<str> = Arc::from(text.as_str());
         let Some(contents) = self.conflict_output_bytes_for_save(text, cx) else {
             return;
         };
+        let Some(file) = self
+            .conflict_resolver
+            .cached_loaded_file_for_target(repo_id, &path)
+        else {
+            return;
+        };
+        let previous_contents = file
+            .current_bytes
+            .clone()
+            .or_else(|| file.current.as_ref().map(|text| Arc::from(text.as_bytes())));
+        let expected_contents = previous_contents.clone().map_or(
+            gitcomet_state::msg::WorktreeSaveBaseline::Absent,
+            gitcomet_state::msg::WorktreeSaveBaseline::Present,
+        );
+        let saved_contents: Arc<[u8]> = Arc::from(contents.as_bytes());
+        let (completion, completed) = smol::channel::bounded(1);
         self.store.dispatch(Msg::SaveWorktreeFile {
             repo_id,
-            path,
+            path: path.clone(),
             contents,
-            expected_contents: None,
+            expected_contents,
             stage,
-            completion: None,
+            completion: Some(completion),
         });
+        cx.spawn(async move |view, cx| {
+            if crate::ui_runtime::background_compute(move || completed.recv_blocking()).await
+                != Ok(true)
+            {
+                return;
+            }
+            let _ = view.update(cx, |this, cx| {
+                if !this.conflict_resolver.matches_target(repo_id, &path) {
+                    return;
+                }
+                let Some(file) = &mut this.conflict_resolver.loaded_file else {
+                    return;
+                };
+                let current = file
+                    .current_bytes
+                    .clone()
+                    .or_else(|| file.current.as_ref().map(|text| Arc::from(text.as_bytes())));
+                if current != previous_contents {
+                    return;
+                }
+                file.current_bytes = Some(saved_contents);
+                file.current = Some(saved_text);
+                cx.notify();
+            });
+        })
+        .detach();
         self.mark_conflict_resolved_output_saved(cx);
     }
 
@@ -2642,6 +2685,7 @@ impl DiffRenderer {
                     hovered_link: None,
                     change_extents: None,
                     tasks_editable: false,
+                    disclosures: None,
                 };
                 let vertical_scrollbar_gutter = if vertical_sync_enabled {
                     px(0.0)

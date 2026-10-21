@@ -219,6 +219,13 @@ pub struct ConflictRegionResolutionUpdate {
     pub resolution: gitcomet_core::conflict_session::ConflictRegionResolution,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WorktreeSaveBaseline {
+    DeriveFromLoadedConflict,
+    Absent,
+    Present(Arc<[u8]>),
+}
+
 pub use gitcomet_core::conflict_session::ConflictAutosolveStats;
 
 /// Why the file-system watcher is in a degraded state (carried by [`Msg::RepoWatchDegraded`]).
@@ -925,8 +932,7 @@ pub enum Msg {
         repo_id: RepoId,
         path: PathBuf,
         contents: ContentBytes,
-        /// Contents read by the caller, or `None` to use the loaded conflict baseline.
-        expected_contents: Option<Arc<[u8]>>,
+        expected_contents: WorktreeSaveBaseline,
         stage: bool,
         /// Reports whether this exact write succeeded. A closed channel also
         /// means failure; callers must not infer success from an idle queue.
@@ -1201,6 +1207,7 @@ pub enum Msg {
     ConflictToggleRegionSource {
         repo_id: RepoId,
         path: RepoPath,
+        origin: Arc<super::ConflictRegionOrigin>,
         region_index: usize,
         source: gitcomet_core::merge::MergeSource,
     },
@@ -1208,6 +1215,7 @@ pub enum Msg {
     ConflictReplaceRegionSelection {
         repo_id: RepoId,
         path: RepoPath,
+        origin: Arc<super::ConflictRegionOrigin>,
         region_index: usize,
         selection: gitcomet_core::merge::OrderedSelection,
     },
@@ -1217,6 +1225,7 @@ pub enum Msg {
     ConflictTogglePlanBlockSource {
         repo_id: RepoId,
         path: RepoPath,
+        origin: Arc<super::ConflictPlanOrigin>,
         block_id: gitcomet_core::merge::MergeBlockId,
         source: gitcomet_core::merge::MergeSource,
     },
@@ -1224,12 +1233,14 @@ pub enum Msg {
     ConflictReplacePlanBlockSelection {
         repo_id: RepoId,
         path: RepoPath,
+        origin: Arc<super::ConflictPlanOrigin>,
         block_id: gitcomet_core::merge::MergeBlockId,
         selection: gitcomet_core::merge::OrderedSelection,
     },
     ConflictSyncRegionResolutions {
         repo_id: RepoId,
         path: RepoPath,
+        origin: Arc<super::ConflictRegionOrigin>,
         updates: Vec<ConflictRegionResolutionUpdate>,
     },
     ConflictApplyAutosolve {

@@ -1,3 +1,5 @@
+mod conflict_plan_origin;
+mod conflict_region_origin;
 mod control;
 mod effect;
 mod message;
@@ -12,6 +14,8 @@ mod repo_path_list;
 mod status;
 mod store_event;
 
+pub use conflict_plan_origin::ConflictPlanOrigin;
+pub use conflict_region_origin::ConflictRegionOrigin;
 pub use control::ControlEffect;
 pub use effect::Effect;
 pub use persistence::PersistenceEffect;
@@ -23,6 +27,7 @@ pub use message::{
     BranchExistsChoice, CommitSelectMode, ConflictAutosolveMode, ConflictAutosolveStats,
     ConflictBulkChoice, ConflictBulkScope, ConflictRegionChoice, ConflictRegionResolutionUpdate,
     ContentBytes, InternalMsg, Msg, RepoActionKind, RepoWatchDegradedReason, WorktreeListRead,
+    WorktreeSaveBaseline,
 };
 pub use repo_command_kind::RepoCommandKind;
 pub use repo_external_change::{ChangedPaths, MAX_CHANGED_PATHS, RepoExternalChange};
