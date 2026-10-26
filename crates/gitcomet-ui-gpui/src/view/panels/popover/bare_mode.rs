@@ -27,17 +27,13 @@ impl PopoverHost {
 
 pub(super) fn menu(this: &PopoverHost, repo_id: RepoId) -> ContextMenuModel {
     let repo = this.state.repos.iter().find(|repo| repo.id == repo_id);
-    ContextMenuModel::new(vec![
-        ContextMenuItem::Header("Git Bare".into()),
-        ContextMenuItem::Entry {
-            label: "Disable bare mode".into(),
-            icon: None,
-            shortcut: None,
-            disabled: repo
-                .is_none_or(|repo| !repo.is_bare() || repo.bare_mode_conversion.is_busy()),
-            action: Box::new(ContextMenuAction::PreviewDisableBareMode { repo_id }),
-        },
-    ])
+    ContextMenuModel::new(vec![ContextMenuItem::Entry {
+        label: "Disable bare mode".into(),
+        icon: None,
+        shortcut: None,
+        disabled: repo.is_none_or(|repo| !repo.is_bare() || repo.bare_mode_conversion.is_busy()),
+        action: Box::new(ContextMenuAction::PreviewDisableBareMode { repo_id }),
+    }])
 }
 
 fn head_description(head: &BareConversionHead) -> String {
