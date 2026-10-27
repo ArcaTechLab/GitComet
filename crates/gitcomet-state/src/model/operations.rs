@@ -59,6 +59,7 @@ pub enum CloneOpStatus {
 pub struct CommandLogEntry {
     pub time: SystemTime,
     pub ok: bool,
+    pub kind: CommandLogKind,
     pub command: String,
     pub summary: String,
     /// Shared and capped: the log is deep-copied on every store dispatch
@@ -81,6 +82,12 @@ pub struct CommandLogEntry {
     /// command. When present, the UI does not also show the generic command
     /// completion toast/banner.
     pub hook_operation_id: Option<GitOperationId>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandLogKind {
+    Pull,
+    Other,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -145,6 +152,7 @@ pub struct GitHookOperation {
     pub output_bytes: usize,
     pub output_truncated: bool,
     pub latest_line: String,
+    pub command: Option<Arc<str>>,
     /// An explicit command requested activity before producing any output.
     pub command_started: bool,
     /// Latest large-file transfer progress, when the operation moved content.
@@ -165,6 +173,10 @@ impl GitHookOperation {
         self.command_started || self.has_hooks() || self.transfer.is_some()
     }
 
+    pub fn has_activity_details(&self) -> bool {
+        self.is_reportable() || self.command.is_some()
+    }
+
     pub fn active_hook_name(&self) -> Option<&str> {
         self.hooks
             .iter()
@@ -176,7 +188,7 @@ impl GitHookOperation {
     pub fn combined_output(&self) -> String {
         let mut output = String::new();
         if self.output_truncated {
-            output.push_str("[Earlier hook output was truncated]\n");
+            output.push_str("[Earlier output was truncated]\n");
         }
         for chunk in self.output.iter() {
             output.push_str(&chunk.text);
