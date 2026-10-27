@@ -102,6 +102,9 @@ impl Msg {
             | Self::UpdateRepositoryPreference { repo_id, .. }
             | Self::SetHistoryScope { repo_id, .. }
             | Self::SetHistoryAuthorFilter { repo_id, .. }
+            | Self::SetHistoryFocus { repo_id, .. }
+            | Self::ToggleHistoryFocus { repo_id, .. }
+            | Self::FocusHistoryRefs { repo_id, .. }
             | Self::LoadMoreHistory { repo_id, .. }
             | Self::SelectCommit { repo_id, .. }
             | Self::SelectCommitMulti { repo_id, .. }

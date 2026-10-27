@@ -245,6 +245,9 @@ pub(crate) fn msg_requires_available_git(msg: &Msg) -> bool {
             | Msg::RepoExternallyChanged { .. }
             | Msg::SetHistoryScope { .. }
             | Msg::SetHistoryAuthorFilter { .. }
+            | Msg::SetHistoryFocus { .. }
+            | Msg::ToggleHistoryFocus { .. }
+            | Msg::FocusHistoryRefs { .. }
             | Msg::LoadMoreHistory { .. }
             | Msg::SelectCommit { .. }
             | Msg::CompareCommitRange { .. }
@@ -1121,6 +1124,17 @@ fn reduce_inner(
         Msg::SetHistoryScope { repo_id, scope } => {
             external_and_history::set_history_scope(state, repo_id, scope)
         }
+        Msg::SetHistoryFocus { repo_id, focus } => {
+            external_and_history::set_history_focus(state, repo_id, focus)
+        }
+        Msg::ToggleHistoryFocus { repo_id, target } => {
+            external_and_history::toggle_history_focus(state, repo_id, target)
+        }
+        Msg::FocusHistoryRefs {
+            repo_id,
+            targets,
+            focused,
+        } => external_and_history::focus_history_refs(state, repo_id, &targets, focused),
         Msg::SetHistoryAuthorFilter { repo_id, author } => {
             external_and_history::set_history_author_filter(state, repo_id, author)
         }

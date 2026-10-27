@@ -671,13 +671,21 @@ pub trait GitRepository: Send + Sync {
     /// packs written since become visible; later reads reopen the store.
     fn release_object_store(&self) {}
 
-    /// Distinct author names across the complete, unfiltered history scope.
-    /// Called on demand, independently of the visible commit metadata cache.
+    /// Distinct author names across the walk's complete history, without an
+    /// author filter. Called on demand, independently of the visible commit
+    /// metadata cache.
+    ///
+    /// `focus` narrows the walk the way [`Self::read_history`] does, so the
+    /// catalog offers the authors of the commits actually on screen.
     fn history_authors(
         &self,
-        mode: HistoryMode,
+        walk: &HistoryWalk,
+        focus: &HistoryFocusSet,
         cancellation: &CancellationToken,
     ) -> Result<Arc<[Arc<str>]>> {
+        let _ = focus;
+        refuse_hidden_remotes(walk)?;
+        let mode = walk.mode();
         let mut authors = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut cursor = None;
@@ -703,8 +711,9 @@ pub trait GitRepository: Send + Sync {
     /// from the branch tip to the requested offset.
     fn build_history_index(
         &self,
-        _mode: HistoryMode,
+        _walk: &HistoryWalk,
         _author: Option<&str>,
+        _focus: &HistoryFocusSet,
         cancellation: &CancellationToken,
         _on_progress: &mut dyn FnMut(crate::history_index::HistoryIndexProgress),
     ) -> Result<Option<crate::history_index::HistoryIndexHandle>> {
@@ -738,14 +747,23 @@ pub trait GitRepository: Send + Sync {
 
     /// Read or refresh a history snapshot. Backends without snapshot support
     /// conservatively rebuild and never claim an unchanged result.
+    ///
+    /// A non-empty `focus` replaces the walk's tips with the refs it names, so
+    /// the page holds only the commits those refs reach. The default
+    /// implementation has no way to reseed the paged reader and ignores it, the
+    /// same way it ignores `author`; backends that support focus override this.
     fn read_history(
         &self,
-        mode: HistoryMode,
+        walk: &HistoryWalk,
         author: Option<&str>,
+        focus: &HistoryFocusSet,
         request: &HistoryReadRequest,
         cancellation: &CancellationToken,
         on_chunk: &mut dyn FnMut(LogChunk),
     ) -> Result<HistoryReadResult> {
+        let _ = focus;
+        refuse_hidden_remotes(walk)?;
+        let mode = walk.mode();
         let page = match request {
             HistoryReadRequest::Page {
                 limit,
@@ -2145,6 +2163,51 @@ impl HistoryRefFilter {
     }
 }
 
+/// What a history walk starts from: its mode, and the remotes an all-branches
+/// walk leaves out. A hidden remote's refs are the remote-tracking refs its
+/// fetch refspecs write, unless a shown remote's refspecs write them too.
+/// Other modes walk only HEAD, so they hide nothing.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct HistoryWalk {
+    mode: HistoryMode,
+    hidden_remotes: Arc<[Arc<str>]>,
+}
+
+impl HistoryWalk {
+    pub fn new<I, S>(mode: HistoryMode, hidden_remotes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Arc<str>>,
+    {
+        let mut hidden: Vec<Arc<str>> = if mode.is_all_branches() {
+            hidden_remotes.into_iter().map(Into::into).collect()
+        } else {
+            Vec::new()
+        };
+        hidden.sort();
+        hidden.dedup();
+        Self {
+            mode,
+            hidden_remotes: hidden.into(),
+        }
+    }
+
+    pub fn mode(&self) -> HistoryMode {
+        self.mode
+    }
+
+    /// Sorted remote names.
+    pub fn hidden_remotes(&self) -> &[Arc<str>] {
+        &self.hidden_remotes
+    }
+}
+
+impl From<HistoryMode> for HistoryWalk {
+    fn from(mode: HistoryMode) -> Self {
+        Self::new(mode, std::iter::empty::<Arc<str>>())
+    }
+}
+
 fn ref_pattern_matches(pattern: &str, name: &str) -> bool {
     if !pattern.contains('*') {
         let pattern = pattern.trim_end_matches('/');
@@ -2205,6 +2268,15 @@ impl RepositoryOptions {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
+}
+
+fn refuse_hidden_remotes(walk: &HistoryWalk) -> Result<()> {
+    if !walk.hidden_remotes().is_empty() {
+        return Err(Error::new(ErrorKind::Unsupported(
+            "hiding remotes from history is not supported by this backend",
+        )));
+    }
+    Ok(())
 }
 
 fn unsupported_repository_options() -> Error {
