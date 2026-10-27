@@ -13,9 +13,9 @@ use gitcomet_core::remote_url::RemoteUrlPolicy;
 use gitcomet_core::services::{
     BlameLine, CancellationToken, CheckoutRemoteBranchMode, CommandOutput, CommitOperationOutcome,
     ConflictFileStages, ConflictSide, ForcePushLease, GitRepository, InteractiveRebaseEntry,
-    MergetoolResult, PullMode, RemoteUrlKind, ResetMode, Result, SafePushAfterCommitContext,
-    SafePushAfterCommitDecision, SafePushAfterCommitTarget, SequencerState, SubmoduleTrustDecision,
-    SubmoduleTrustTarget, WorktreeCheckout,
+    MergetoolResult, PullMode, RemoteUrlKind, ResetMode, Result, RewordCommitOutcome,
+    SafePushAfterCommitContext, SafePushAfterCommitDecision, SafePushAfterCommitTarget,
+    SequencerState, SubmoduleTrustDecision, SubmoduleTrustTarget, WorktreeCheckout,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1614,6 +1614,31 @@ impl GitRepository for GixRepo {
         let _operation = self.operation_lease()?;
         self.require_working_tree()?;
         self.interactive_rebase_with_output_impl(base, entries)
+    }
+
+    fn reword_commit_with_output(
+        &self,
+        commit_id: &CommitId,
+        message: &str,
+    ) -> Result<RewordCommitOutcome> {
+        let _operation = self.operation_lease()?;
+        self.require_working_tree()?;
+        self.reword_commit_with_output_impl(commit_id, message)
+    }
+
+    fn continue_reword_commit_with_output(
+        &self,
+        commit_id: &CommitId,
+        message: &str,
+    ) -> Result<RewordCommitOutcome> {
+        let _operation = self.operation_lease()?;
+        self.require_working_tree()?;
+        self.continue_reword_commit_with_output_impl(commit_id, message)
+    }
+
+    fn reword_commit_in_progress(&self, commit_id: &CommitId, message: &str) -> Result<bool> {
+        let _operation = self.operation_lease()?;
+        self.reword_commit_in_progress_impl(commit_id, message)
     }
 
     fn interactive_cherry_pick_with_output(
