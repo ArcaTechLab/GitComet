@@ -580,6 +580,7 @@ pub(in crate::view) fn hash_branch_sidebar_rows(rows: &[BranchSidebarRow]) -> u6
                 tooltip.len().hash(&mut h);
             }
             BranchSidebarRow::SectionSpacer
+            | BranchSidebarRow::EmptyCard { .. }
             | BranchSidebarRow::WorktreesHeader { .. }
             | BranchSidebarRow::WorktreePlaceholder { .. }
             | BranchSidebarRow::SubmodulesHeader { .. }
