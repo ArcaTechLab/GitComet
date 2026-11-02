@@ -221,6 +221,11 @@ impl std::fmt::Debug for InternalMsg {
                 .field("repo_id", repo_id)
                 .field("result", result)
                 .finish(),
+            InternalMsg::CommitActivityLoaded { repo_id, result } => f
+                .debug_struct("CommitActivityLoaded")
+                .field("repo_id", repo_id)
+                .field("result", result)
+                .finish(),
             InternalMsg::StashesLoaded { repo_id, result } => f
                 .debug_struct("StashesLoaded")
                 .field("repo_id", repo_id)

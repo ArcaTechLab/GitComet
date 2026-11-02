@@ -596,6 +596,10 @@ pub enum Msg {
     LoadStashes {
         repo_id: RepoId,
     },
+    /// Loads per-day commit counts for the history heatmap.
+    LoadCommitActivity {
+        repo_id: RepoId,
+    },
     LoadConflictFile {
         repo_id: RepoId,
         path: PathBuf,
@@ -1549,6 +1553,10 @@ pub enum InternalMsg {
     StashesLoaded {
         repo_id: RepoId,
         result: Result<Vec<StashEntry>, Error>,
+    },
+    CommitActivityLoaded {
+        repo_id: RepoId,
+        result: Result<CommitActivity, Error>,
     },
     ReflogLoaded {
         repo_id: RepoId,

@@ -14,6 +14,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 pub(in crate::view) mod annotations;
+pub(in crate::view) mod activity_heatmap;
 mod cache_build;
 mod columns;
 pub(in crate::view) mod find;
@@ -558,6 +559,15 @@ pub(in super::super) struct HistoryView {
     pub(in super::super) history_branch_names: HistoryBranchNamesMode,
     pub(in super::super) history_show_graph: bool,
     pub(in super::super) history_show_graph_gradient: bool,
+    pub(in super::super) history_show_activity_heatmap: bool,
+    activity_heatmap: Entity<activity_heatmap::ActivityHeatmapView>,
+    /// What the last `LoadCommitActivity` was requested for: repo, history
+    /// scope and the newest commit, so paging older commits does not reload.
+    activity_request_key: Option<(RepoId, LogScope, Option<CommitId>)>,
+    /// Repo and revision of the activity the heatmap entity currently shows.
+    activity_synced: Option<(RepoId, u64)>,
+    /// Result of the last `sync_activity_heatmap`, read while building the view.
+    show_activity_heatmap: bool,
     pub(in super::super) history_show_author: bool,
     pub(in super::super) history_show_date: bool,
     pub(in super::super) history_show_sha: bool,
@@ -771,6 +781,7 @@ impl HistoryView {
                 repo.tags_rev.hash(&mut hasher);
             }
             repo.stashes_rev.hash(&mut hasher);
+            repo.commit_activity_rev.hash(&mut hasher);
             repo.history_state.selected_commit_rev.hash(&mut hasher);
             repo.history_state.indexed.rev.hash(&mut hasher);
             // The browsed commit's mark. Not `file_browser_rev`: that moves on
@@ -803,6 +814,7 @@ impl HistoryView {
         history_highlight_commit_chain: bool,
         history_show_graph: bool,
         history_show_graph_gradient: bool,
+        history_show_activity_heatmap: bool,
         history_show_author: bool,
         history_show_date: bool,
         history_show_sha: bool,
@@ -953,6 +965,11 @@ impl HistoryView {
             history_branch_names,
             history_show_graph,
             history_show_graph_gradient,
+            history_show_activity_heatmap,
+            activity_heatmap: cx.new(|_| activity_heatmap::ActivityHeatmapView::new(theme)),
+            activity_request_key: None,
+            activity_synced: None,
+            show_activity_heatmap: false,
             history_show_author,
             history_show_date,
             history_show_sha,
@@ -1008,6 +1025,50 @@ impl HistoryView {
                 }
             },
         ));
+    }
+
+    /// Keeps the heatmap's data current: asks the store for the year's commit
+    /// counts when the repo, history scope or newest commit changes, and hands
+    /// the result to the heatmap entity. Idempotent, so it runs on every render.
+    ///
+    /// Returns whether the heatmap strip should be shown.
+    pub(super) fn sync_activity_heatmap(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        if !self.history_show_activity_heatmap {
+            return false;
+        }
+        let Some(repo) = self.active_repo() else {
+            return false;
+        };
+        if !matches!(repo.open, Loadable::Ready(())) {
+            return false;
+        }
+        let repo_id = repo.id;
+        // Wait for the first page so a fresh repo is not queried twice.
+        let head = match &repo.log {
+            Loadable::Ready(page) => Some(page.commits.first().map(|c| c.id.clone())),
+            _ => None,
+        };
+        let scope = repo.history_state.history_scope;
+        let (activity, shown) = match &repo.commit_activity {
+            Loadable::Ready(activity) => (Some(Arc::clone(activity)), true),
+            Loadable::Error(_) => (None, false),
+            Loadable::Loading | Loadable::NotLoaded => (None, true),
+        };
+        let synced = Some((repo_id, repo.commit_activity_rev));
+
+        if let Some(head) = head {
+            let key = Some((repo_id, scope, head));
+            if self.activity_request_key != key {
+                self.activity_request_key = key;
+                self.store.dispatch(Msg::LoadCommitActivity { repo_id });
+            }
+        }
+        if self.activity_synced != synced {
+            self.activity_synced = synced;
+            self.activity_heatmap
+                .update(cx, |heatmap, cx| heatmap.set_activity(activity, cx));
+        }
+        shown
     }
 
     pub(in super::super) fn active_repo_id(&self) -> Option<RepoId> {
@@ -1389,6 +1450,8 @@ impl HistoryView {
 
     pub(in super::super) fn set_theme(&mut self, theme: AppTheme, cx: &mut gpui::Context<Self>) {
         self.theme = theme;
+        self.activity_heatmap
+            .update(cx, |heatmap, cx| heatmap.set_theme(theme, cx));
         cx.notify();
     }
 
@@ -1466,6 +1529,22 @@ impl HistoryView {
             return;
         }
         self.history_show_graph_gradient = enabled;
+        cx.notify();
+    }
+
+    pub(in super::super) fn set_history_show_activity_heatmap(
+        &mut self,
+        enabled: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.history_show_activity_heatmap == enabled {
+            return;
+        }
+        self.history_show_activity_heatmap = enabled;
+        if !enabled {
+            // Re-enabling must load fresh data rather than trust a stale key.
+            self.activity_request_key = None;
+        }
         cx.notify();
     }
 

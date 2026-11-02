@@ -262,6 +262,7 @@ pub(crate) fn msg_requires_available_git(msg: &Msg) -> bool {
             | Msg::SelectConflictDiff { .. }
             | Msg::SelectWorktreeUncommitted { .. }
             | Msg::LoadStashes { .. }
+            | Msg::LoadCommitActivity { .. }
             | Msg::LoadConflictFile { .. }
             | Msg::LoadReflog { .. }
             | Msg::LoadRecentCommitMessages { .. }
@@ -1279,6 +1280,7 @@ fn reduce_inner(
             effects::ensure_sidebar_data(state, repo_id, request)
         }
         Msg::LoadStashes { repo_id } => effects::load_stashes(state, repo_id),
+        Msg::LoadCommitActivity { repo_id } => effects::load_commit_activity(state, repo_id),
         Msg::LoadConflictFile {
             repo_id,
             path,
@@ -2447,6 +2449,9 @@ fn reduce_inner(
         }
         Msg::Internal(crate::msg::InternalMsg::RemoteTagsLoaded { repo_id, result }) => {
             effects::remote_tags_loaded(inputs, state, repo_id, result)
+        }
+        Msg::Internal(crate::msg::InternalMsg::CommitActivityLoaded { repo_id, result }) => {
+            effects::commit_activity_loaded(state, repo_id, result)
         }
         Msg::Internal(crate::msg::InternalMsg::StashesLoaded { repo_id, result }) => {
             effects::stashes_loaded(inputs, state, repo_id, result)

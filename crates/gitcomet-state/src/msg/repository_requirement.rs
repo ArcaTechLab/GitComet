@@ -124,6 +124,7 @@ impl Msg {
             | Self::ClearDiffSelection { repo_id, .. }
             | Self::EnsureSidebarData { repo_id, .. }
             | Self::LoadStashes { repo_id, .. }
+            | Self::LoadCommitActivity { repo_id, .. }
             | Self::LoadReflog { repo_id, .. }
             | Self::LoadRecentCommitMessages { repo_id, .. }
             | Self::LoadHoverCommitMessage { repo_id, .. }

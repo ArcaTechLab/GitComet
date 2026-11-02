@@ -89,6 +89,12 @@ pub(super) fn send_unavailable_git_effect_result(
             cursor,
             result: Err(git_unavailable_error(runtime)),
         })),
+        Effect::LoadCommitActivity { repo_id, .. } => {
+            send(Msg::Internal(crate::msg::InternalMsg::CommitActivityLoaded {
+                repo_id,
+                result: Err(git_unavailable_error(runtime)),
+            }))
+        }
         Effect::LoadStashes { repo_id, .. } => {
             send(Msg::Internal(crate::msg::InternalMsg::StashesLoaded {
                 repo_id,

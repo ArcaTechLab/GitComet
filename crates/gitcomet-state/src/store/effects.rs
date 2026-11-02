@@ -361,6 +361,20 @@ pub(super) fn schedule_effect(
             limit,
             cursor,
         ),
+        Effect::LoadCommitActivity { repo_id, mode } => {
+            if let Some((msg_tx, cancellation)) =
+                repo_load_context(thread_state, repos, msg_tx, repo_id)
+            {
+                repo_load::schedule_load_commit_activity(
+                    repo_load_executor,
+                    repos,
+                    msg_tx,
+                    repo_id,
+                    mode,
+                    cancellation,
+                );
+            }
+        }
         Effect::LoadStashes { repo_id, limit } => {
             if let Some((msg_tx, cancellation)) =
                 repo_load_context(thread_state, repos, msg_tx, repo_id)

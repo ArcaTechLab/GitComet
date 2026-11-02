@@ -54,6 +54,7 @@ impl MainPaneView {
                 preferences.history.highlight_commit_chain,
                 preferences.history.show_graph,
                 preferences.history.show_graph_gradient,
+                preferences.history.show_activity_heatmap,
                 preferences.history.show_author,
                 preferences.history.show_date,
                 preferences.history.show_sha,
@@ -402,6 +403,21 @@ impl MainPaneView {
 
     pub(in crate::view) fn history_show_graph_gradient(&self, cx: &App) -> bool {
         self.history_view.read(cx).history_show_graph_gradient
+    }
+
+    pub(in crate::view) fn set_history_show_activity_heatmap(
+        &mut self,
+        enabled: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.history_view.update(cx, |view, cx| {
+            view.set_history_show_activity_heatmap(enabled, cx)
+        });
+        cx.notify();
+    }
+
+    pub(in crate::view) fn history_show_activity_heatmap(&self, cx: &App) -> bool {
+        self.history_view.read(cx).history_show_activity_heatmap
     }
 
     pub(in crate::view) fn set_history_relative_dates(

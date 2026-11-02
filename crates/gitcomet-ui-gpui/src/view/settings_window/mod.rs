@@ -512,6 +512,7 @@ impl SettingsCategory {
             }
             Self::GitLog => {
                 "git log default history mode history columns relative dates show tags graph gradient fade glow \
+                 activity heatmap contributions calendar commits per day \
                  author sha files tab follows selected commit browse repository file browsing start exit \
                  verify commit signatures verification signing key trust"
             }
@@ -670,6 +671,7 @@ pub(crate) struct SettingsWindowView {
     history_branch_names: HistoryBranchNamesMode,
     history_show_graph: bool,
     history_show_graph_gradient: bool,
+    history_show_activity_heatmap: bool,
     history_show_author: bool,
     history_show_date: bool,
     history_show_sha: bool,
@@ -1097,6 +1099,7 @@ impl SettingsWindowView {
         let history_branch_names = ui_preferences.history.branch_names;
         let history_show_graph = ui_preferences.history.show_graph;
         let history_show_graph_gradient = ui_preferences.history.show_graph_gradient;
+        let history_show_activity_heatmap = ui_preferences.history.show_activity_heatmap;
         let history_show_author = ui_preferences.history.show_author;
         let history_show_date = ui_preferences.history.show_date;
         let history_show_sha = ui_preferences.history.show_sha;
@@ -1458,6 +1461,7 @@ impl SettingsWindowView {
             history_branch_names,
             history_show_graph,
             history_show_graph_gradient,
+            history_show_activity_heatmap,
             history_show_author,
             history_show_date,
             history_show_sha,

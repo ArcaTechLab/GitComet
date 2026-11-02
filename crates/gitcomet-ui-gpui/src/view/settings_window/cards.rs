@@ -1729,6 +1729,21 @@ impl SettingsWindowView {
                 }),
             ),
         );
+        git_log_card = git_log_card.child(
+            self.toggle_row(
+                "settings_window_git_log_show_activity_heatmap",
+                "Show activity heatmap",
+                self.history_show_activity_heatmap,
+                theme,
+            )
+            .on_activate(
+                false,
+                controls::ControlActivation::Action,
+                cx.listener(|this, _e: &ClickEvent, _window, cx| {
+                    this.set_history_show_activity_heatmap(!this.history_show_activity_heatmap, cx);
+                }),
+            ),
+        );
         git_log_card = git_log_card.child(highlight_commit_chain_row);
         git_log_card = git_log_card.child(files_follow_selected_commit_row);
         git_log_card = git_log_card.child(relative_dates_row);

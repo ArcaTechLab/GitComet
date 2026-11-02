@@ -599,6 +599,36 @@ pub enum SafePushAfterCommitDecision {
     },
 }
 
+/// Pages through history (newest first) and counts commits per day for the
+/// window ending at `today`. Stops once a whole page is older than the window.
+pub(crate) fn collect_commit_activity(
+    today: std::time::SystemTime,
+    cancellation: &CancellationToken,
+    mut next_page: impl FnMut(Option<&LogCursor>) -> Result<Arc<LogPage>>,
+) -> Result<CommitActivity> {
+    let mut activity = CommitActivity::empty_ending_at(today);
+    let since = activity.since();
+    let mut cursor: Option<LogCursor> = None;
+    loop {
+        cancellation.check_cancelled()?;
+        let page = next_page(cursor.as_ref())?;
+        let mut in_window = false;
+        for commit in &page.commits {
+            // Pages are not strictly time ordered (merges, skewed clocks),
+            // so only stop once a whole page is older than the window.
+            if commit.time >= since {
+                in_window = true;
+                activity.record(commit.time);
+            }
+        }
+        match page.next_cursor.clone() {
+            Some(next) if in_window => cursor = Some(next),
+            _ => break,
+        }
+    }
+    Ok(activity)
+}
+
 /// Backend operations, including optional capabilities with conservative defaults.
 ///
 /// Cancellable methods take the caller's token explicitly. Implementations that
@@ -870,6 +900,21 @@ pub trait GitRepository: Send + Sync {
         cancellation: &CancellationToken,
     ) -> Result<Arc<LogPage>> {
         self.log_history_mode_page_streaming(mode, author, limit, cursor, cancellation, &mut |_| {})
+    }
+
+    /// Counts commits per day over the last year for the history heatmap.
+    ///
+    /// The default implementation pages through the history until it reaches
+    /// commits older than the window; backends may override it with a cheaper walk.
+    fn commit_activity(
+        &self,
+        mode: HistoryMode,
+        today: std::time::SystemTime,
+        cancellation: &CancellationToken,
+    ) -> Result<CommitActivity> {
+        collect_commit_activity(today, cancellation, |cursor| {
+            self.log_history_mode_page_filtered(mode, None, 2000, cursor, cancellation)
+        })
     }
 
     fn log_head_page(

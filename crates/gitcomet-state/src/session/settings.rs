@@ -57,6 +57,7 @@ pub struct UiSettings {
     pub history_branch_names: Option<String>,
     pub history_show_graph: Option<bool>,
     pub history_show_graph_gradient: Option<bool>,
+    pub history_show_activity_heatmap: Option<bool>,
     pub history_show_author: Option<bool>,
     pub history_show_date: Option<bool>,
     pub history_show_sha: Option<bool>,
@@ -162,6 +163,7 @@ pub fn persist_ui_settings_to_path(settings: UiSettings, path: &Path) -> io::Res
         apply_setting!(settings, file, history_branch_names);
         apply_setting!(settings, file, history_show_graph);
         apply_setting!(settings, file, history_show_graph_gradient);
+        apply_setting!(settings, file, history_show_activity_heatmap);
         apply_setting!(settings, file, history_show_author);
         apply_setting!(settings, file, history_show_date);
         apply_setting!(settings, file, history_show_sha);

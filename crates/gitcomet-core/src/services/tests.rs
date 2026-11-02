@@ -846,3 +846,95 @@ fn only_an_all_branches_walk_hides_remotes() {
         assert_eq!(walk, HistoryWalk::from(mode), "{mode:?}");
     }
 }
+
+mod commit_activity {
+    use super::*;
+    use crate::domain::{Commit, CommitActivity};
+    use crate::services::collect_commit_activity;
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime};
+
+    fn commit_at(id: &str, day: i64) -> Commit {
+        Commit {
+            id: CommitId(id.into()),
+            parent_ids: Default::default(),
+            summary: "s".into(),
+            author: "a".into(),
+            time: SystemTime::UNIX_EPOCH + Duration::from_secs(day as u64 * 86_400 + 100),
+        }
+    }
+
+    fn cursor(id: &str) -> LogCursor {
+        LogCursor {
+            last_seen: CommitId(id.into()),
+            resume_from: None,
+            resume_token: None,
+        }
+    }
+
+    #[test]
+    fn stops_paging_once_a_page_is_older_than_the_window() {
+        let today = SystemTime::UNIX_EPOCH + Duration::from_secs(19_725 * 86_400);
+        let window_start = CommitActivity::empty_ending_at(today).first_day;
+        let pages = vec![
+            LogPage {
+                commits: vec![commit_at("a", 19_725), commit_at("b", 19_724)],
+                next_cursor: Some(cursor("b")),
+            },
+            LogPage {
+                commits: vec![commit_at("c", window_start), commit_at("d", 19_724)],
+                next_cursor: Some(cursor("d")),
+            },
+            LogPage {
+                commits: vec![commit_at("old", window_start - 30)],
+                next_cursor: Some(cursor("old")),
+            },
+            LogPage {
+                commits: vec![commit_at("never-read", 19_700)],
+                next_cursor: None,
+            },
+        ];
+        let mut requested = 0;
+        let activity = collect_commit_activity(today, &CancellationToken::new(), |_| {
+            let page = pages[requested].clone();
+            requested += 1;
+            Ok(Arc::new(page))
+        })
+        .expect("activity");
+        assert_eq!(requested, 3, "the page after the first stale one is skipped");
+        assert_eq!(activity.total, 4);
+        assert_eq!(activity.counts[0], 1);
+        assert_eq!(activity.counts[(19_724 - window_start) as usize], 2);
+    }
+
+    #[test]
+    fn single_page_history_needs_one_request() {
+        let today = SystemTime::UNIX_EPOCH + Duration::from_secs(19_725 * 86_400);
+        let mut requested = 0;
+        let activity = collect_commit_activity(today, &CancellationToken::new(), |cursor| {
+            assert!(cursor.is_none());
+            requested += 1;
+            Ok(Arc::new(LogPage {
+                commits: vec![commit_at("a", 19_725)],
+                next_cursor: None,
+            }))
+        })
+        .expect("activity");
+        assert_eq!((requested, activity.total), (1, 1));
+    }
+
+    #[test]
+    fn cancellation_is_honored_between_pages() {
+        let today = SystemTime::UNIX_EPOCH + Duration::from_secs(19_725 * 86_400);
+        let token = CancellationToken::new();
+        let inner = token.clone();
+        let result = collect_commit_activity(today, &token, |_| {
+            inner.cancel();
+            Ok(Arc::new(LogPage {
+                commits: vec![commit_at("a", 19_725)],
+                next_cursor: Some(cursor("a")),
+            }))
+        });
+        assert!(result.is_err());
+    }
+}

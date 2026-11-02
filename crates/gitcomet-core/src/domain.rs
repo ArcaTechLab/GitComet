@@ -2385,6 +2385,73 @@ pub struct LogPage {
     pub next_cursor: Option<LogCursor>,
 }
 
+/// Number of calendar days covered by a [`CommitActivity`] (53 weeks, so the
+/// grid always has full week columns).
+pub const COMMIT_ACTIVITY_DAYS: usize = 53 * 7;
+
+/// Per-day commit counts for roughly the last year, used by the history
+/// heatmap. Days are whole UTC days counted from the Unix epoch.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CommitActivity {
+    /// Day number (days since the Unix epoch, UTC) of `counts[0]`. It is
+    /// always a Sunday so each 7 entries form one week column.
+    pub first_day: i64,
+    /// One entry per day, `COMMIT_ACTIVITY_DAYS` long.
+    pub counts: Vec<u32>,
+    /// Sum of `counts`.
+    pub total: u32,
+}
+
+const SECS_PER_DAY: i64 = 86_400;
+
+/// Days since the Unix epoch (UTC) for `time`; negative before 1970.
+pub fn unix_day_of(time: SystemTime) -> i64 {
+    let secs = match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(d) => d.as_secs() as i64,
+        Err(e) => -(e.duration().as_secs() as i64),
+    };
+    secs.div_euclid(SECS_PER_DAY)
+}
+
+/// Weekday of a Unix day number, 0 = Sunday .. 6 = Saturday (1970-01-01 was a Thursday).
+pub fn weekday_of_unix_day(day: i64) -> usize {
+    (day + 4).rem_euclid(7) as usize
+}
+
+impl CommitActivity {
+    /// An empty activity grid whose last column contains `today`.
+    pub fn empty_ending_at(today: SystemTime) -> Self {
+        let today_day = unix_day_of(today);
+        let last_week_start = today_day - weekday_of_unix_day(today_day) as i64;
+        Self {
+            first_day: last_week_start - (COMMIT_ACTIVITY_DAYS as i64 - 7),
+            counts: vec![0; COMMIT_ACTIVITY_DAYS],
+            total: 0,
+        }
+    }
+
+    /// Oldest instant that falls inside the grid.
+    pub fn since(&self) -> SystemTime {
+        let secs = self.first_day.saturating_mul(SECS_PER_DAY);
+        if secs >= 0 {
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64)
+        } else {
+            SystemTime::UNIX_EPOCH - std::time::Duration::from_secs(secs.unsigned_abs())
+        }
+    }
+
+    /// Counts one commit made at `time`; commits outside the grid are ignored.
+    pub fn record(&mut self, time: SystemTime) {
+        let idx = unix_day_of(time) - self.first_day;
+        if idx >= 0
+            && let Some(slot) = self.counts.get_mut(idx as usize)
+        {
+            *slot += 1;
+            self.total += 1;
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LogCursor {
     pub last_seen: CommitId,
@@ -3172,5 +3239,61 @@ mod history_focus_tests {
             HistoryFocusSet::from_iter([a.clone(), b.clone()]),
             HistoryFocusSet::from_iter([b.clone(), a.clone(), a.clone()])
         );
+    }
+}
+
+#[cfg(test)]
+mod commit_activity_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn at_day(day: i64, secs_into_day: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(day as u64 * 86_400 + secs_into_day)
+    }
+
+    #[test]
+    fn weekday_matches_known_dates() {
+        // 1970-01-01 Thursday, 2024-01-01 Monday.
+        assert_eq!(weekday_of_unix_day(0), 4);
+        assert_eq!(weekday_of_unix_day(19_723), 1);
+        assert_eq!(weekday_of_unix_day(-1), 3);
+    }
+
+    #[test]
+    fn grid_starts_on_sunday_and_ends_in_the_current_week() {
+        // 2024-01-03 is a Wednesday.
+        let today = at_day(19_725, 3_600);
+        let activity = CommitActivity::empty_ending_at(today);
+        assert_eq!(activity.counts.len(), COMMIT_ACTIVITY_DAYS);
+        assert_eq!(weekday_of_unix_day(activity.first_day), 0);
+        let last_day = activity.first_day + COMMIT_ACTIVITY_DAYS as i64 - 1;
+        // The final column is the current week (Sun..Sat), so it ends on Saturday
+        // at or after today.
+        assert_eq!(weekday_of_unix_day(last_day), 6);
+        assert!(last_day >= 19_725 && last_day - 19_725 < 7);
+    }
+
+    #[test]
+    fn record_buckets_by_day_and_ignores_out_of_window_commits() {
+        let today = at_day(19_725, 0);
+        let mut activity = CommitActivity::empty_ending_at(today);
+        let first = activity.first_day;
+        activity.record(at_day(first, 0));
+        activity.record(at_day(first, 86_399));
+        activity.record(at_day(19_725, 12 * 3_600));
+        activity.record(at_day(first - 1, 0));
+        activity.record(at_day(first + COMMIT_ACTIVITY_DAYS as i64, 0));
+        assert_eq!(activity.counts[0], 2);
+        assert_eq!(activity.counts[(19_725 - first) as usize], 1);
+        assert_eq!(activity.total, 3);
+        assert_eq!(activity.counts.iter().sum::<u32>(), 3);
+    }
+
+    #[test]
+    fn since_is_the_start_of_the_first_day() {
+        let activity = CommitActivity::empty_ending_at(at_day(19_725, 0));
+        assert_eq!(unix_day_of(activity.since()), activity.first_day);
+        let before = activity.since() - Duration::from_secs(1);
+        assert_eq!(unix_day_of(before), activity.first_day - 1);
     }
 }

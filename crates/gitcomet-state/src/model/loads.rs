@@ -16,6 +16,8 @@ pub enum LoadKind {
     WorktreeStatus,
     StagedStatus,
     Stashes,
+    /// Per-day commit counts for the history heatmap.
+    CommitActivity,
     Reflog,
     RebaseState,
     MergeCommitMessage,

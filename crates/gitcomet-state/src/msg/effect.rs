@@ -72,6 +72,10 @@ pub enum Effect {
         repo_id: RepoId,
         limit: usize,
     },
+    LoadCommitActivity {
+        repo_id: RepoId,
+        mode: HistoryMode,
+    },
     LoadReflog {
         repo_id: RepoId,
         limit: usize,
@@ -414,6 +418,7 @@ impl Effect {
             | Self::OpenRepo { .. }
             | Self::LoadLog { .. }
             | Self::LoadStashes { .. }
+            | Self::LoadCommitActivity { .. }
             | Self::LoadReflog { .. }
             | Self::LoadRecentCommitMessages { .. }
             | Self::LoadFileHistory { .. }

@@ -18,6 +18,7 @@ impl Render for HistoryView {
     fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         self.last_window_size = window.viewport_size();
         let headers = self.sync_history_annotations(window, cx);
+        self.show_activity_heatmap = self.sync_activity_heatmap(cx);
         let content = self.history_view_inner(window, cx);
         if headers.is_empty() {
             return content.into_any_element();
@@ -263,6 +264,12 @@ impl HistoryView {
                     window.refresh();
                 }
             }))
+            .when(self.show_activity_heatmap, |this| {
+                this.child(crate::view::stable_cached_fixed_height_view(
+                    self.activity_heatmap.clone(),
+                    px(super::activity_heatmap::ACTIVITY_HEATMAP_HEIGHT_PX),
+                ))
+            })
             .child(
                 div()
                     .w_full()

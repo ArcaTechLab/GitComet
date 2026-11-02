@@ -155,6 +155,7 @@ pub(super) fn effect_repo_id(effect: &Effect) -> Option<RepoId> {
         | Effect::References(ReferenceEffect::LoadTags { repo_id })
         | Effect::References(ReferenceEffect::LoadRemoteTags { repo_id })
         | Effect::LoadStashes { repo_id, .. }
+        | Effect::LoadCommitActivity { repo_id, .. }
         | Effect::LoadWorktrees { repo_id }
         | Effect::LoadWorktreeDirty { repo_id, .. }
         | Effect::References(ReferenceEffect::LoadRefMetadata { repo_id })

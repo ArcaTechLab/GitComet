@@ -833,6 +833,20 @@ impl GitCometView {
         cx.notify();
     }
 
+    pub(in crate::view) fn set_history_show_activity_heatmap(
+        &mut self,
+        enabled: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.update_ui_preferences(cx, move |preferences| {
+            preferences.history.show_activity_heatmap = enabled;
+        });
+        self.main_pane.update(cx, |pane, cx| {
+            pane.set_history_show_activity_heatmap(enabled, cx);
+        });
+        cx.notify();
+    }
+
     pub(in crate::view) fn set_history_relative_dates(
         &mut self,
         enabled: bool,
@@ -1049,6 +1063,9 @@ impl GitCometView {
             }
             PreferenceChange::HistoryShowGraphGradient(enabled) => {
                 self.set_history_show_graph_gradient(enabled, cx)
+            }
+            PreferenceChange::HistoryShowActivityHeatmap(enabled) => {
+                self.set_history_show_activity_heatmap(enabled, cx)
             }
             PreferenceChange::FilesFollowSelectedCommit(enabled) => {
                 self.set_files_follow_selected_commit_preference(enabled, cx)

@@ -11,7 +11,7 @@ use crate::msg::{CommitSelectMode, Effect, WorktreeListRead};
 use crate::msg::{ReferenceEffect, RepoCommandEffect, StatusEffect};
 use crate::store::reducer::prepared::ReducerInputs;
 use gitcomet_core::domain::{
-    Branch, Commit, CommitDetails, CommitId, CommitSignature, FileEntry, FileSource,
+    Branch, Commit, CommitActivity, CommitDetails, CommitId, CommitSignature, FileEntry, FileSource,
     FileStatusKind, RecentCommitMessage, RefMetadata, ReflogEntry, Remote, RemoteBranch, RemoteTag,
     RepoStatus, StashEntry, Submodule, Tag, UpstreamDivergence, Worktree, WorktreeDirtySummary,
     empty_tree_id_like, is_empty_tree_id,
@@ -994,6 +994,49 @@ pub(super) fn load_stashes(state: &mut AppState, repo_id: RepoId) -> Vec<Effect>
     } else {
         Vec::new()
     }
+}
+
+pub(super) fn load_commit_activity(state: &mut AppState, repo_id: RepoId) -> Vec<Effect> {
+    let Some(repo_state) = state.repos.iter_mut().find(|r| r.id == repo_id) else {
+        return Vec::new();
+    };
+    if !matches!(repo_state.open, Loadable::Ready(())) {
+        return Vec::new();
+    }
+    // Keep showing the previous grid while a refresh is in flight.
+    if !matches!(repo_state.commit_activity, Loadable::Ready(_)) {
+        repo_state.set_commit_activity(Loadable::Loading);
+    }
+    if repo_state.loads_in_flight.request(LoadKind::CommitActivity) {
+        vec![Effect::LoadCommitActivity {
+            repo_id,
+            mode: repo_state.history_state.history_scope,
+        }]
+    } else {
+        Vec::new()
+    }
+}
+
+pub(super) fn commit_activity_loaded(
+    state: &mut AppState,
+    repo_id: RepoId,
+    result: std::result::Result<CommitActivity, Error>,
+) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    if let Some(repo_state) = state.repos.iter_mut().find(|r| r.id == repo_id) {
+        let activity = match result {
+            Ok(v) => Loadable::Ready(v),
+            Err(e) => Loadable::Error(e.to_string()),
+        };
+        repo_state.set_commit_activity(activity);
+        if repo_state.loads_in_flight.finish(LoadKind::CommitActivity) {
+            effects.push(Effect::LoadCommitActivity {
+                repo_id,
+                mode: repo_state.history_state.history_scope,
+            });
+        }
+    }
+    effects
 }
 
 pub(super) fn refresh_branches(state: &mut AppState, repo_id: RepoId) -> Vec<Effect> {

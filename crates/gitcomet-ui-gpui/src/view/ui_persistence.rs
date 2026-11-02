@@ -153,6 +153,8 @@ impl GitCometView {
                             this.main_pane.read(cx).history_relative_dates(cx);
                         let history_show_graph_gradient =
                             this.main_pane.read(cx).history_show_graph_gradient(cx);
+                        let history_show_activity_heatmap =
+                            this.main_pane.read(cx).history_show_activity_heatmap(cx);
                         let history_highlight_commit_chain =
                             this.main_pane.read(cx).history_highlight_commit_chain(cx);
                         let (
@@ -250,6 +252,7 @@ impl GitCometView {
                             history_branch_names: None,
                             history_show_graph: Some(history_show_graph),
                             history_show_graph_gradient: Some(history_show_graph_gradient),
+                            history_show_activity_heatmap: Some(history_show_activity_heatmap),
                             history_show_author: Some(history_show_author),
                             history_show_date: Some(history_show_date),
                             history_show_sha: Some(history_show_sha),

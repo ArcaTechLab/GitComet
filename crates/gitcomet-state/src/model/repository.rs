@@ -150,6 +150,9 @@ pub struct RepoState {
     pub log_rev: u64,
     pub stashes: Loadable<Arc<Vec<StashEntry>>>,
     pub stashes_rev: u64,
+    /// Per-day commit counts for the last year (history heatmap).
+    pub commit_activity: Loadable<Arc<CommitActivity>>,
+    pub commit_activity_rev: u64,
     pub reflog: Loadable<Arc<Vec<ReflogEntry>>>,
     pub reflog_rev: u64,
     pub recent_commit_messages: Loadable<Arc<Vec<RecentCommitMessage>>>,
@@ -402,6 +405,8 @@ impl RepoState {
             log_rev: 0,
             stashes: Loadable::NotLoaded,
             stashes_rev: 0,
+            commit_activity: Loadable::NotLoaded,
+            commit_activity_rev: 0,
             reflog: Loadable::NotLoaded,
             reflog_rev: 0,
             recent_commit_messages: Loadable::NotLoaded,
@@ -599,6 +604,15 @@ impl RepoState {
         self.remote_branches_rev = self.remote_branches_rev.wrapping_add(1);
         self.invalidate_ref_metadata();
         self.bump_branch_sidebar_rev();
+    }
+
+    pub(crate) fn set_commit_activity(&mut self, activity: Loadable<CommitActivity>) {
+        let activity = loadable_into_arc(activity);
+        if self.commit_activity == activity {
+            return;
+        }
+        self.commit_activity = activity;
+        self.commit_activity_rev = self.commit_activity_rev.wrapping_add(1);
     }
 
     pub(crate) fn set_stashes(&mut self, stashes: Loadable<Vec<StashEntry>>) {
