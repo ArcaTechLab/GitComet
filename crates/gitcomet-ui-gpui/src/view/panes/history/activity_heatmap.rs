@@ -9,12 +9,13 @@ use gitcomet_core::domain::{COMMIT_ACTIVITY_DAYS, CommitActivity, weekday_of_uni
 use gitcomet_ui_kit::theme::with_alpha;
 use std::time::SystemTime;
 
-const CELL_PX: f32 = 5.0;
+/// Cells share the full width of the pane, so only their height is fixed.
+const CELL_HEIGHT_PX: f32 = 6.0;
 const CELL_GAP_PX: f32 = 2.0;
 const WEEKS: usize = COMMIT_ACTIVITY_DAYS / 7;
-const VERTICAL_PADDING_PX: f32 = 3.0;
-/// Height of the whole strip: seven cells, six gaps, padding and a hairline.
-pub(in crate::view) const ACTIVITY_HEATMAP_HEIGHT_PX: f32 = CELL_PX * 7.0
+const VERTICAL_PADDING_PX: f32 = 4.0;
+/// Height of the whole strip: seven rows, six gaps, padding and a hairline.
+pub(in crate::view) const ACTIVITY_HEATMAP_HEIGHT_PX: f32 = CELL_HEIGHT_PX * 7.0
     + CELL_GAP_PX * 6.0
     + VERTICAL_PADDING_PX * 2.0
     + 1.0;
@@ -81,27 +82,33 @@ impl Render for ActivityHeatmapView {
             n => level_colors[usize::from(n.min(LEVELS)) - 1],
         };
 
-        let mut grid = div().flex().flex_none().gap(px(CELL_GAP_PX));
+        let mut grid = div()
+            .flex()
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .items_center()
+            .gap(px(CELL_GAP_PX));
         for week in 0..WEEKS {
-            let mut column = div().flex().flex_col().flex_none().gap(px(CELL_GAP_PX));
+            let mut column = div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w(px(1.0))
+                .gap(px(CELL_GAP_PX));
             for weekday in 0..7 {
                 let index = week * 7 + weekday;
                 let day = activity.first_day + index as i64;
                 let count = activity.counts.get(index).copied().unwrap_or(0);
                 // The final column is the current week: days after today stay blank.
                 if day > today {
-                    column = column.child(
-                        div()
-                            .w(px(CELL_PX))
-                            .h(px(CELL_PX))
-                            .flex_none(),
-                    );
+                    column = column.child(div().w_full().h(px(CELL_HEIGHT_PX)).flex_none());
                     continue;
                 }
                 let cell = div()
                     .id(("history_activity_cell", index))
-                    .w(px(CELL_PX))
-                    .h(px(CELL_PX))
+                    .w_full()
+                    .h(px(CELL_HEIGHT_PX))
                     .flex_none()
                     .rounded(px(1.0))
                     .bg(color_for(level_for(count, thresholds)));
@@ -114,37 +121,11 @@ impl Render for ActivityHeatmapView {
             grid = grid.child(column);
         }
 
-        let summary: SharedString = if loading {
-            "Loading activity…".into()
-        } else if activity.total == 1 {
-            "1 commit in the last year".into()
-        } else {
-            format!("{} commits in the last year", activity.total).into()
-        };
-
-        let mut legend = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(CELL_GAP_PX))
-            .child(div().text_xs().mr(px(3.0)).child("Less"));
-        for level in 0..=LEVELS {
-            legend = legend.child(
-                div()
-                    .w(px(CELL_PX))
-                    .h(px(CELL_PX))
-                    .rounded(px(1.0))
-                    .bg(color_for(level)),
-            );
-        }
-        legend = legend.child(div().text_xs().ml(px(3.0)).child("More"));
-
         div()
             .id("history_activity_heatmap")
             .debug_selector(|| "history_activity_heatmap".to_string())
             .flex()
             .items_center()
-            .gap_3()
             .w_full()
             .h(px(ACTIVITY_HEATMAP_HEIGHT_PX))
             .px_2()
@@ -152,26 +133,7 @@ impl Render for ActivityHeatmapView {
             .bg(theme.colors.surface.canvas)
             .border_b_1()
             .border_color(theme.colors.stroke.subtle)
-            .text_color(theme.colors.foreground.secondary)
             .child(grid)
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .items_center()
-                    .justify_end()
-                    .gap_3()
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .text_xs()
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .child(summary),
-                    )
-                    .child(legend),
-            )
     }
 }
 
